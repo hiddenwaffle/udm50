@@ -573,15 +573,19 @@ function showLauncher() {
 
     if (DEBUG_SUMMON) dlog('[reveal:launcher] as-found —', JSON.stringify(revealSnapshot(win)));
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // BECOME A REGULAR APP BEFORE ACTIVATING. An accessory app (menu-bar only, no Dock icon) is the
+    // weakest possible case for taking focus, and on macOS 14+ activateIgnoringOtherApps no longer
+    // reliably lets a background app steal activation at all — it fails SILENTLY. Proven on a second
+    // machine 2026-07-28: the reveal snapshot showed appActive:false and focusedId:null AFTER
+    // app.focus({steal:true}) had run, and `[app] became active` did not appear in the log until the
+    // user clicked the bar seven seconds later. The AI window path never had this bug because
+    // bringForward() calls setRegular() first — this is that same missing step.
+    // hideLauncher drops us back to accessory, so the Dock icon only exists while the bar is up.
+    setRegular();
     win.show();
-    // UNCONDITIONAL on purpose. This used to be gated on `!appActive`, a flag derived from
-    // did-become-active/did-resign-active — and a summoned bar that doesn't take the keyboard is
-    // exactly what a stale-true flag looks like (reported 2026-07-28 on a second machine: bar
-    // appears, focus stays in Terminal). Two ways it can go stale, both OS-version dependent:
-    // app.hide() on dismiss may not emit resign-active for an accessory app with no windows, and
-    // app.show() on the next summon may emit become-active even though it does not focus anything.
-    // The gate was never worth defending anyway — it was tried against the old activation flash
-    // and did not fix it. Activating when already frontmost is harmless; not activating is fatal.
+    // Unconditional. It used to be gated on `!appActive`; the gate was not the cause here (the flag
+    // read false), but it was already recorded as not fixing the flash it was added for, and a bar
+    // that silently declines to take the keyboard is the worst thing this code can do.
     app.focus({ steal: true });
     win.focus();
     win.webContents.focus();                    // ensure keystrokes go to the input
@@ -637,6 +641,12 @@ function hideLauncher(yieldFocus) {
   launcher = null;   // clear ref first so the window's own blur/close handlers no-op
   if (yieldFocus) yieldActivation(w);
   w.destroy();       // fully close it; the next summon builds a fresh one on the current Space
+  // Back to menu-bar-only. reveal() escalates to a regular app so it can take focus at all; without
+  // this the Dock icon would stay behind after the bar is gone. Gated on `yieldFocus`, i.e. genuine
+  // dismissals: the submit path is about to open the AI window, which wants regular anyway, and
+  // flipping accessory→regular milliseconds apart is pointless churn in the flash-prone code.
+  // (Submitting an EMPTY query opens nothing, so that path restores accessory itself.)
+  if (yieldFocus && (!aiWindow || aiWindow.isDestroyed())) setAccessory();
 }
 
 function toggleLauncher() {
@@ -1365,7 +1375,7 @@ ipcMain.on('submit-query', (_e, payload) => {
   // Tolerate the old string form so a stale renderer can't wedge submission.
   const isPrivate = !!(payload && typeof payload === 'object' && payload.private);
   const q = String((payload && typeof payload === 'object' ? payload.query : payload) || '').trim();
-  if (!q) return;
+  if (!q) { setAccessory(); return; } // nothing is opening — drop the Dock icon reveal() added
   if (!isPrivate) addHistory(q); // a private query leaves no trace in the recall list
   showAiMode(q, { private: isPrivate }).catch((e) => derror('[ai] open failed', String(e)));
 });
