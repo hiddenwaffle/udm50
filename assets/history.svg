@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 684 242" width="684" role="img" aria-label="The launcher bar with a partial query typed and the history list open beneath it, showing three earlier questions; the first is highlighted and every row has a delete cross at its right edge.">
+  <defs><filter id="sh" x="-30%" y="-30%" width="160%" height="160%">
+    <feDropShadow dx="0" dy="12" stdDeviation="11" flood-color="#000" flood-opacity="0.45"/>
+  </filter></defs>
+  <rect x="22" y="22" width="640" height="198" rx="16" fill="#1c1c1e" filter="url(#sh)"/>
+  <text x="48" y="66.4" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="24" font-weight="400" fill="#fff">dyld</text>
+  <rect x="106" y="44" width="2" height="30" fill="#4c8dff"/>
+  <rect x="22" y="94" width="640" height="1" fill="#ffffff" fill-opacity="0.08"/>
+  <rect x="28" y="100" width="628" height="38" rx="10" fill="#ffffff" fill-opacity="0.13"/>
+  <text x="48" y="124.6" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="16" font-weight="400" fill="#ffffff">how does dyld resolve @rpath</text>
+  <text x="636" y="124.6" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="16" font-weight="400" fill="#ffffff" text-anchor="end">×</text>
+  <text x="48" y="162.6" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="16" font-weight="400" fill="#d9d9dc">dyld interposing vs DYLD_INSERT_LIBRARIES</text>
+  <text x="636" y="162.6" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="16" font-weight="400" fill="#8a8a8e" text-anchor="end">×</text>
+  <text x="48" y="200.6" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="16" font-weight="400" fill="#d9d9dc">why is dyld_shared_cache so large</text>
+  <text x="636" y="200.6" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="16" font-weight="400" fill="#8a8a8e" text-anchor="end">×</text>
+</svg>

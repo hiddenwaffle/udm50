@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #2b2b2f;
+    font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+    user-select: none;
+  }
+  #bar { display: flex; align-items: center; gap: 4px; height: 100%; padding: 0 6px 0 10px; box-sizing: border-box; }
+  #q { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: #fff; font: inherit; padding: 2px; }
+  #count { min-width: 52px; text-align: right; color: #9a9a9e; font-variant-numeric: tabular-nums; padding: 0 2px; white-space: nowrap; }
+  #sep { width: 1px; height: 18px; background: #45454c; margin: 0 2px; }
+  button { border: none; background: transparent; color: #cfcfd4; cursor: pointer; font: 15px -apple-system, sans-serif; line-height: 1; padding: 3px 6px; border-radius: 6px; }
+  button:hover { background: rgba(255, 255, 255, 0.10); }
+</style>
+</head>
+<body>
+<div id="bar">
+  <input id="q" type="text" placeholder="Find in conversation" spellcheck="false">
+  <span id="count"></span>
+  <span id="sep"></span>
+  <button id="prev" title="Previous (Shift+Enter)" tabindex="-1">↑</button>
+  <button id="next" title="Next (Enter)" tabindex="-1">↓</button>
+  <button id="x" title="Close (Esc)" tabindex="-1">×</button>
+</div>
+<script>
+  // This runs in the find bar's OWN child window, outside the searched page — findInPage can
+  // shuffle focus inside the AI window's webContents all it likes; the keyboard stays here.
+  // (An in-page bar fought findInPage's focus stealing forever; see main.js "Find-in-page".)
+  const { ipcRenderer } = require('electron');
+  const input = document.getElementById('q');
+  const count = document.getElementById('count');
+  let lastQuery = '', sessionQuery = '', debounce = 0;
+
+  function setCount(active, matches) {
+    if (!lastQuery) { count.textContent = ''; return; }
+    count.textContent = matches ? `${active}/${matches}` : 'No results';
+    count.style.color = matches ? '#9a9a9e' : '#ff8f8f';
+  }
+
+  function stop() {
+    sessionQuery = '';
+    ipcRenderer.send('find:stop');
+    setCount(0, 0);
+  }
+
+  // findNext=true steps within the current find session (Enter / ↑↓ / Cmd+G) — but Chromium only
+  // honours it for the text the session was started with. If the box no longer matches the session
+  // (typed, then stepped before the debounce fired), stepping is a silent no-op, so start fresh.
+  function search(findNext, forward) {
+    lastQuery = input.value;
+    if (!lastQuery) { stop(); return; }
+    const step = !!findNext && lastQuery === sessionQuery;
+    sessionQuery = lastQuery;
+    ipcRenderer.send('find', { text: lastQuery, findNext: step, forward: forward !== false });
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounce);
+    lastQuery = input.value;
+    if (!lastQuery) { stop(); return; }
+    debounce = setTimeout(() => search(false, true), 120);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); clearTimeout(debounce); search(true, !e.shiftKey); }
+    else if (e.key === 'Escape') { e.preventDefault(); ipcRenderer.send('find:close'); }
+  });
+
+  function btn(id, fn) {
+    document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); fn(); input.focus(); });
+  }
+  btn('prev', () => search(true, false));
+  btn('next', () => search(true, true));
+  btn('x', () => ipcRenderer.send('find:close'));
+
+  ipcRenderer.on('find:open', () => { input.focus(); input.select(); if (input.value) search(false, true); });
+  ipcRenderer.on('find:again', (_e, back) => { if (input.value) search(true, !back); });
+  ipcRenderer.on('find:result', (_e, r) => { if (r && r.final) setCount(r.active, r.matches); });
+
+  window.addEventListener('focus', () => input.focus());
+  input.focus();
+</script>
+</body>
+</html>

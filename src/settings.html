@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { color-scheme: light dark; }
+  html, body {
+    margin: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1e1e20; color: #ececee;
+    -webkit-user-select: none;
+  }
+  .wrap { padding: 22px 24px; display: flex; flex-direction: column; height: 100%; box-sizing: border-box; overflow-y: auto; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 16px; color: #fff; }
+  .row { display: flex; align-items: center; margin-bottom: 10px; }
+  .label { width: 84px; font-size: 13px; color: #b9b9bd; }
+  .combo {
+    flex: 1; min-height: 34px; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 8px; font-size: 15px; letter-spacing: 1px; color: #fff; cursor: pointer; padding: 0 8px;
+  }
+  .combo.recording { border-color: #4c8dff; color: #9cc0ff; }
+  button { font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.18);
+           background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; }
+  button:hover { background: rgba(255,255,255,0.15); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .rec { margin-left: 10px; }
+  .ghost { margin-left: 6px; border-color: transparent; background: transparent; color: #9a9a9e; }
+  .ghost:hover { background: rgba(255,255,255,0.08); }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #d4d4d8; }
+  .hint { font-size: 12px; color: #8a8a8e; margin: 2px 0 10px 84px; }
+  .hint.warn { color: #e0b072; }
+  .spacer { flex: 1; }
+  #status { font-size: 12px; color: #8a8a8e; min-height: 16px; margin-bottom: 10px; }
+  #status.warn { color: #ff9f9f; }
+  #status.ok { color: #7bd88f; }
+  .footer { display: flex; justify-content: flex-end; gap: 10px; }
+  .primary { background: #2f6fed; border-color: #2f6fed; }
+  .primary:hover { background: #3c7bf7; }
+  input[type="range"] { flex: 1; accent-color: #2f6fed; height: 4px; }
+  #cache-value { width: 96px; text-align: right; font-size: 13px; color: #d4d4d8; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Global Hotkey</h1>
+
+    <div class="row">
+      <div class="label">Shortcut</div>
+      <div class="combo" id="combo-primary">…</div>
+      <button class="rec" data-field="primary">Record</button>
+    </div>
+
+    <div class="row">
+      <div class="label">Fallback</div>
+      <div class="combo" id="combo-fallback">None</div>
+      <button class="rec" data-field="fallback">Record</button>
+      <button id="clear-fallback" class="ghost">Clear</button>
+    </div>
+    <div class="hint">The fallback is used only if the shortcut above is already taken by another app.</div>
+
+    <div class="row" style="margin-top: 14px;">
+      <div class="label">&nbsp;</div>
+      <label class="check"><input type="checkbox" id="enabled" /> Enable global hotkey</label>
+    </div>
+    <div class="hint">When disabled, summon from the ✦ menu-bar icon instead.</div>
+
+    <h1 style="margin-top: 22px;">AI Mode Window</h1>
+    <div class="row">
+      <div class="label">&nbsp;</div>
+      <label class="check"><input type="checkbox" id="persist" /> Remember window size &amp; position</label>
+    </div>
+    <div class="hint">When on, the mini browser reopens where you last left it.</div>
+    <div class="row" style="margin-top: 4px;">
+      <div class="label">&nbsp;</div>
+      <button id="reset-bounds" style="margin-left: 0;">Reset window</button>
+    </div>
+
+    <h1 style="margin-top: 22px;">Links</h1>
+    <div class="row">
+      <div class="label">&nbsp;</div>
+      <label class="check"><input type="checkbox" id="old-reddit" /> Copy Reddit links as old.reddit.com</label>
+    </div>
+    <div class="hint">Applies to www.reddit.com and reddit.com links only.</div>
+
+    <h1 style="margin-top: 22px;">Saved Data</h1>
+    <div class="row">
+      <div class="label">Max cache</div>
+      <input type="range" id="cache-slider" min="0" max="6" step="1" value="0" />
+      <div id="cache-value">Minimal</div>
+    </div>
+    <div class="row" style="margin-top: 6px;">
+      <div class="label">&nbsp;</div>
+      <button id="clear-cache" style="margin-left: 0;">Clear cache</button>
+    </div>
+    <div class="row" style="margin-top: 6px;">
+      <div class="label">&nbsp;</div>
+      <button id="clear-cookies" style="margin-left: 0;">Clear cookies</button>
+    </div>
+    <div class="hint warn">Clears the Google cookies that mark this app as a returning browser, so the next launch — and every query asked in forget mode, which copies them — may make you solve the "unusual traffic" CAPTCHA.</div>
+
+    <div class="spacer"></div>
+    <div id="status"></div>
+    <div class="footer">
+      <button id="cancel">Cancel</button>
+      <button id="save" class="primary">Save</button>
+    </div>
+  </div>
+
+  <script>
+    const combos = { primary: document.getElementById('combo-primary'), fallback: document.getElementById('combo-fallback') };
+    const chk = document.getElementById('enabled');
+    const persistChk = document.getElementById('persist');
+    const oldRedditChk = document.getElementById('old-reddit');
+    const cacheSlider = document.getElementById('cache-slider');
+    const cacheValue = document.getElementById('cache-value');
+    const clearBtn = document.getElementById('clear-cache');
+    const clearCookiesBtn = document.getElementById('clear-cookies');
+    const status = document.getElementById('status');
+
+    const CACHE_STOPS = [0, 25, 50, 100, 250, 500, 1024]; // MB; index 0 = Minimal
+    function cacheLabel(mb) {
+      if (!mb) return 'Minimal';
+      return mb >= 1024 ? `${mb % 1024 ? (mb / 1024).toFixed(1) : mb / 1024} GB` : `${mb} MB`;
+    }
+    function currentCacheMB() { return CACHE_STOPS[Number(cacheSlider.value)] || 0; }
+    function sliderIndexForMB(mb) {
+      const i = CACHE_STOPS.findIndex((s) => s >= mb);
+      return i < 0 ? CACHE_STOPS.length - 1 : i;
+    }
+    cacheSlider.addEventListener('input', () => { cacheValue.textContent = cacheLabel(currentCacheMB()); });
+
+    let pending = { primary: null, fallback: '' };
+    let enabled = true;
+    let recording = null; // 'primary' | 'fallback' | null
+
+    const SYM = { Command:'⌘', CommandOrControl:'⌘', Control:'⌃', Alt:'⌥', Shift:'⇧', Super:'⌘',
+                  Space:'Space', Return:'⏎', Up:'↑', Down:'↓', Left:'←', Right:'→' };
+    function pretty(accel) {
+      if (!accel) return 'None';
+      return accel.split('+').map((p) => SYM[p] || p).join(' ');
+    }
+    function setStatus(text, cls) { status.textContent = text || ''; status.className = cls || ''; }
+
+    function render() {
+      for (const f of ['primary', 'fallback']) {
+        combos[f].textContent = recording === f ? 'Press shortcut…' : pretty(pending[f]);
+        combos[f].classList.toggle('recording', recording === f);
+        combos[f].style.opacity = enabled ? '1' : '0.4';
+      }
+      document.querySelectorAll('.rec, #clear-fallback').forEach((b) => { b.disabled = !enabled; });
+    }
+
+    function keyFromCode(code) {
+      if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+      if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+      if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+      const map = { Space:'Space', ArrowUp:'Up', ArrowDown:'Down', ArrowLeft:'Left', ArrowRight:'Right',
+                    Minus:'-', Equal:'=', BracketLeft:'[', BracketRight:']', Backslash:'\\\\',
+                    Semicolon:';', Quote:"'", Comma:',', Period:'.', Slash:'/', Backquote:'`',
+                    Enter:'Return', Tab:'Tab' };
+      return map[code] || null;
+    }
+
+    function startRecording(field) {
+      if (!enabled) return;
+      recording = field;
+      setStatus('Press a combination · Esc to cancel');
+      render();
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (!recording) return;
+      e.preventDefault();
+      if (e.key === 'Escape') { recording = null; setStatus(''); render(); return; }
+      if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return; // wait for a non-modifier
+      const mods = [];
+      if (e.metaKey) mods.push('Command');
+      if (e.ctrlKey) mods.push('Control');
+      if (e.altKey) mods.push('Alt');
+      if (e.shiftKey) mods.push('Shift');
+      const key = keyFromCode(e.code);
+      if (!key) { setStatus('Unsupported key — try another', 'warn'); return; }
+      if (!mods.length) { setStatus('Add at least one modifier (⌘ ⌥ ⌃ ⇧)', 'warn'); return; }
+      pending[recording] = mods.concat(key).join('+');
+      recording = null;
+      setStatus('');
+      render();
+    }, true);
+
+    document.querySelectorAll('.rec').forEach((b) => b.addEventListener('click', () => startRecording(b.dataset.field)));
+    combos.primary.addEventListener('click', () => startRecording('primary'));
+    combos.fallback.addEventListener('click', () => startRecording('fallback'));
+    document.getElementById('clear-fallback').addEventListener('click', () => { pending.fallback = ''; recording = null; render(); });
+    chk.addEventListener('change', () => { enabled = chk.checked; render(); });
+    document.getElementById('cancel').addEventListener('click', () => window.settingsApi.close());
+    document.getElementById('reset-bounds').addEventListener('click', async () => {
+      await window.settingsApi.resetAiBounds();
+      setStatus('AI Mode window reset to default size & position ✓', 'ok');
+    });
+
+    async function refreshCacheSize() {
+      const size = await window.settingsApi.getCacheSize();
+      clearBtn.textContent = `Clear cache (${size})`;
+    }
+    clearBtn.addEventListener('click', async () => {
+      clearBtn.disabled = true;
+      clearBtn.textContent = 'Clearing…';
+      const size = await window.settingsApi.clearCache();
+      clearBtn.textContent = `Clear cache (${size})`;
+      clearBtn.disabled = false;
+      setStatus('Cache cleared ✓', 'ok');
+    });
+
+    async function refreshCookieSize() {
+      const size = await window.settingsApi.getCookieSize();
+      clearCookiesBtn.textContent = `Clear cookies (${size})`;
+    }
+    clearCookiesBtn.addEventListener('click', async () => {
+      clearCookiesBtn.disabled = true;
+      clearCookiesBtn.textContent = 'Clearing…';
+      const size = await window.settingsApi.clearCookies();
+      clearCookiesBtn.textContent = `Clear cookies (${size})`;
+      clearCookiesBtn.disabled = false;
+      setStatus('Cookies cleared ✓ — next launch may show the CAPTCHA', 'ok');
+    });
+
+    document.getElementById('save').addEventListener('click', async () => {
+      const res = await window.settingsApi.save({ hotkey: pending.primary, hotkeyFallback: pending.fallback, hotkeyEnabled: enabled, maxCacheMB: currentCacheMB(), persistAiBounds: persistChk.checked, rewriteRedditLinks: oldRedditChk.checked });
+      if (enabled && res && !res.registered && (pending.primary || pending.fallback)) {
+        setStatus('⚠ Neither shortcut could register — they may be taken. Try different combos.', 'warn');
+      } else {
+        setStatus(res && res.registered ? `Saved ✓ — using ${pretty(res.registered)}` : 'Saved ✓', 'ok');
+        setTimeout(() => window.settingsApi.close(), 800);
+      }
+    });
+
+    (async function init() {
+      const s = await window.settingsApi.get();
+      pending.primary = s.hotkey || null;
+      pending.fallback = s.hotkeyFallback || '';
+      enabled = s.hotkeyEnabled;
+      chk.checked = enabled;
+      const mb = typeof s.maxCacheMB === 'number' ? s.maxCacheMB : 0;
+      cacheSlider.value = String(sliderIndexForMB(mb));
+      cacheValue.textContent = cacheLabel(currentCacheMB());
+      persistChk.checked = s.persistAiBounds === true;      // default off
+      oldRedditChk.checked = s.rewriteRedditLinks !== false; // default on
+      render();
+      refreshCacheSize();
+      refreshCookieSize();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "udm50",
+  "productName": "udm50",
+  "version": "0.1.0",
+  "description": "Spotlight-style launcher wrapping Google AI Mode (V1 prototype)",
+  "license": "MIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "private": true,
+  "dependencies": {
+    "electron": "^43.1.1"
+  }
+}

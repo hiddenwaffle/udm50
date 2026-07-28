@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 684 116" width="684" role="img" aria-label="The udm50 launcher bar: a dark rounded bar with the hint text, down arrow for history, up arrow for forget mode, control-N and control-P.">
+  <defs><filter id="sh" x="-30%" y="-30%" width="160%" height="160%">
+    <feDropShadow dx="0" dy="12" stdDeviation="11" flood-color="#000" flood-opacity="0.45"/>
+  </filter></defs>
+  <rect x="22" y="22" width="640" height="72" rx="16" fill="#1c1c1e" filter="url(#sh)"/>
+  <text x="48" y="66.4" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="24" font-weight="400" fill="#8e8e93">↓ history · ↑ forget / ⌃N · ⌃P</text>
+</svg>

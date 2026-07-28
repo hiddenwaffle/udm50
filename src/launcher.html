@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+    -webkit-user-select: none;
+  }
+  #panel {
+    background: rgba(28, 28, 30, 0.95);
+    border-radius: 16px;
+    box-shadow: 0 12px 44px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  #q {
+    display: block; width: 100%; box-sizing: border-box; height: 72px;
+    border: none; outline: none; background: transparent;
+    font-size: 24px; padding: 0 26px; color: #fff; caret-color: #4c8dff;
+  }
+  #q::placeholder { color: rgba(255, 255, 255, 0.45); }
+
+  /* Forget mode. Deliberately loud — the whole point is that you can never be unsure which mode
+     you are in. Indigo is the incognito idiom, and it is far enough from the normal near-black
+     that a glance settles it. */
+  #panel.private { background: rgba(40, 26, 66, 0.96); box-shadow: 0 12px 44px rgba(24, 8, 48, 0.62); }
+  #panel.private #q { caret-color: #c39bff; }
+  #panel.private #q::placeholder { color: rgba(214, 190, 255, 0.5); }
+  #badge {
+    position: absolute; top: 22px; right: 24px; pointer-events: none;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    padding: 5px 10px; border-radius: 999px;
+    background: rgba(160, 110, 255, 0.22); color: #d9c2ff;
+    border: 1px solid rgba(180, 140, 255, 0.45);
+  }
+  #badge[hidden] { display: none; }
+
+  #list { list-style: none; margin: 0; padding: 6px; max-height: 320px; overflow-y: auto;
+          border-top: 1px solid rgba(255, 255, 255, 0.08); }
+  #list[hidden] { display: none; }
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 20px; border-radius: 10px; cursor: default;
+    font-size: 16px; color: #d9d9dc;
+  }
+  .row.sel { background: rgba(255, 255, 255, 0.13); color: #fff; }
+  .row .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 10px; }
+  .row .del {
+    flex: none; width: 20px; height: 20px; line-height: 18px; text-align: center;
+    border-radius: 6px; color: rgba(255, 255, 255, 0.55); font-size: 16px; opacity: 0;
+  }
+  .row.sel .del, .row:hover .del { opacity: 1; }
+  .row .del:hover { background: rgba(255, 255, 255, 0.22); color: #fff; }
+  .empty { padding: 12px 20px; color: #8a8a8e; font-size: 14px; }
+  /* Screen-reader-only. A programmatic value change in an already-focused input isn't reliably
+     announced, so ⌘Z restoring a draft would otherwise be silent to VoiceOver. */
+  #live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div id="panel">
+    <!-- placeholder is set by paintMode(), so the hint text lives in exactly one place -->
+    <input id="q" autofocus autocomplete="off" spellcheck="false" />
+    <div id="badge" hidden>NO MEMORY</div>
+    <ul id="list" hidden></ul>
+  </div>
+  <div id="live" role="status" aria-live="polite"></div>
+
+  <script>
+    const input = document.getElementById('q');
+    const panel = document.getElementById('panel');
+    const list = document.getElementById('list');
+    const live = document.getElementById('live');
+    const badge = document.getElementById('badge');
+
+    let priv = false;   // will this query be FORGOTTEN? (internal name; the UI says remember/forget)
+
+    // NAMING, deliberate: the UI says remember/forget, and NEVER "private" or "incognito". Browser
+    // private mode's defining behaviour is an EMPTY cookie jar — you are logged out — and this mode
+    // does the opposite: it copies your Google cookies in so the query doesn't get CAPTCHA'd, which
+    // means Google links it to your normal session exactly as before. "Private" would promise the
+    // reverse of what happens. What this actually guarantees is that THIS APP forgets: no history
+    // row, no draft stash, no cookies or cache outliving the window — and "forget" names the app as
+    // the one doing it, where a passive label like "no record" leaves the subject unsaid.
+    //
+    // The words are DESTINATIONS ("press ↑ to forget"), which is why verbs read right here, and the
+    // pair is deliberately far apart on sight: one word in this line is the only thing telling the
+    // modes apart, so near-identical labels (on record / off record) would defeat the indicator.
+    //
+    // The code below still says `priv`/`private` internally — that is what the non-persistent
+    // session IS at the Electron level. Only the words you can see were renamed.
+    const hint = () => `↓ history · ↑ ${priv ? 'remember' : 'forget'} / ⌃N · ⌃P`;
+
+    function paintMode() {
+      panel.classList.toggle('private', priv);
+      badge.hidden = !priv;
+      input.placeholder = hint();
+    }
+
+    // The mode STICKS across summons (main holds it; see lastPrivate) — unlike every other piece
+    // of bar state, which resets. Flipping is deliberate, so making you re-flip each time would be
+    // busywork, and the indicator means you can't be unaware of the mode you're in.
+    function setPrivate(on) {
+      priv = !!on;
+      paintMode();
+      window.launcher.setMode(priv);
+      // Going private RETRACTS the draft mirror: keystrokes are streamed to main for ⌘Z restore,
+      // so without this the private text would be prefilled into the next bar you summon. Coming
+      // back out re-syncs whatever is in the box.
+      window.launcher.saveDraft(priv ? '' : input.value);
+      // State, not switch position: "forget mode off" is a double negative to parse by ear.
+      announce(priv ? 'This query will be forgotten' : 'This query will be remembered');
+    }
+
+    let open = false;   // is the history dropdown showing?
+    let items = [];     // current rows
+    let sel = -1;       // highlighted index; -1 = none (use the typed text)
+    let dirty = false;    // has anything been typed since this bar opened?
+
+    function resizeToContent() {
+      requestAnimationFrame(() => {
+        window.launcher.resize(open ? panel.getBoundingClientRect().height : 72);
+      });
+    }
+
+    function render() {
+      if (!open) { list.hidden = true; list.innerHTML = ''; return; }
+      list.hidden = false;
+      list.innerHTML = '';
+      if (!items.length) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = input.value.trim() ? 'No matching history' : 'No history yet';
+        list.appendChild(li);
+        return;
+      }
+      items.forEach((text, i) => {
+        const li = document.createElement('li');
+        li.className = 'row' + (i === sel ? ' sel' : '');
+        const txt = document.createElement('span'); txt.className = 'txt'; txt.textContent = text;
+        const del = document.createElement('span'); del.className = 'del'; del.textContent = '×'; del.title = 'Remove from history';
+        li.appendChild(txt); li.appendChild(del);
+        li.addEventListener('mousemove', () => { if (sel !== i) { sel = i; highlight(); } });
+        li.addEventListener('mousedown', (e) => e.preventDefault()); // keep the input focused
+        li.addEventListener('click', (e) => {
+          if (e.target === del) { e.stopPropagation(); sel = i; deleteSel(); }
+          else run(text);
+        });
+        list.appendChild(li);
+      });
+      highlight();
+    }
+
+    function highlight() {
+      const rows = list.querySelectorAll('.row');
+      rows.forEach((r, i) => r.classList.toggle('sel', i === sel));
+      const cur = list.querySelector('.row.sel');
+      if (cur) cur.scrollIntoView({ block: 'nearest' });
+    }
+
+    async function openList() {
+      items = await window.launcher.getHistory(input.value);
+      open = true;
+      sel = items.length ? 0 : -1;
+      render();
+      resizeToContent();
+    }
+
+    function closeList() {
+      open = false; items = []; sel = -1;
+      list.hidden = true; list.innerHTML = '';
+      resizeToContent();
+    }
+
+    async function refilter() {
+      if (!open) return;
+      items = await window.launcher.getHistory(input.value);
+      sel = items.length ? 0 : -1;
+      render();
+      resizeToContent();
+    }
+
+    async function deleteSel() {
+      if (!open || sel < 0 || sel >= items.length) return;
+      items = await window.launcher.deleteHistory(items[sel], input.value);
+      if (sel >= items.length) sel = items.length - 1;
+      render();
+      resizeToContent();
+    }
+
+    function move(d) {
+      if (!open || !items.length) return;
+      sel = Math.max(-1, Math.min(items.length - 1, sel + d));
+      highlight();
+    }
+
+    function pageStep() {
+      const row = list.querySelector('.row');
+      const rh = row ? row.getBoundingClientRect().height : 38;
+      return Math.max(1, Math.floor(list.clientHeight / rh) - 1); // one row of overlap
+    }
+
+    function run(text) {
+      open = false; items = []; sel = -1;
+      list.hidden = true; list.innerHTML = '';
+      input.value = '';
+      window.launcher.submit(text || '', priv);
+    }
+
+    function announce(msg) { live.textContent = msg; }
+
+    // Mirror the box to the main process on every edit, so ⌘Z on a LATER bar can bring back what
+    // you lost — this window is destroyed on every dismiss, so it can't remember for itself.
+    // Send unconditionally: the newest value is always the true content of the box, so there is
+    // nothing to infer about which edit "counted". (An earlier version sent grow-edits at once and
+    // debounced shrink-edits by 400ms, to stop backspacing through "hello" from stashing "h". That
+    // was wrong twice over: destroy() skips unload, so a pending timer died with the window; and
+    // select-all-then-retype is a length SHRINK, putting the most deliberate edit on the lossy
+    // path.) A consequence worth keeping: emptying the box empties the stash, which is the only
+    // gesture this bar has for "forget what I typed".
+    // Nothing about a private query is mirrored to main, so it can never be prefilled or ⌘Z-restored.
+    function reportDraft() { window.launcher.saveDraft(priv ? '' : input.value); }
+
+    // Clear the box the way a keystroke would, so the edit lands on the native undo stack (an
+    // `input.value = ''` assignment is invisible to it) and ⌘Z can walk it back.
+    function clearInput() {
+      input.setSelectionRange(0, input.value.length);
+      document.execCommand('delete');
+      if (input.value !== '') input.value = ''; // belt and braces if execCommand is a no-op here
+      reportDraft();
+      announce('Search cleared');
+    }
+
+    // ⌘Z. Chromium handles in-field undo itself (⌘V works here with no application menu, so its
+    // editing key equivalents are clearly live), and we intercept only to add the cross-summon
+    // case — the `dirty` branch below just calls the same undo Chromium would.
+    // On an untouched bar whose box is EMPTY it means "undo the clear I made before
+    // dismissing" (Spotlight can do that natively because its field is never destroyed; we replay
+    // it from main's cleared slot). Once the box has content it's an ordinary undo of your own
+    // edits, including un-doing the restore itself.
+    async function undo() {
+      if (open) closeList(); // collapse first (as Escape does), so Enter can't commit a stale row
+      if (dirty) { document.execCommand('undo'); return; }
+      // A prefilled box has no edits of ours behind it — emulating the previous session's whole
+      // undo stack is out of scope, so there is nothing to undo here.
+      if (input.value !== '') return;
+      const cleared = await window.launcher.getCleared();
+      if (!cleared) return;
+      // insertText, not `input.value = …`: it goes on the native undo stack, so plain ⌘Z
+      // un-restores and ⇧⌘Z re-restores for free. The resulting `input` event sets `dirty`, so
+      // this branch can't re-fire.
+      input.focus();
+      document.execCommand('insertText', false, cleared);
+      if (input.value !== cleared) { input.value = cleared; dirty = true; } // fallback path
+      input.select(); // restored text arrives highlighted, as Spotlight's does
+      announce('Draft restored');
+    }
+
+    input.addEventListener('keydown', (e) => {
+      // Never act mid-composition (Japanese, Pinyin, dead keys): Chromium reports keyCode 229
+      // while an IME is composing, and isComposing is unreliable on the very first character.
+      // Every key below belongs to the IME until it commits.
+      if (e.isComposing || e.keyCode === 229) return;
+      // readline/emacs muscle memory: ⌃N and ⌃P stand in for ↓ and ↑ EVERYWHERE below — opening
+      // the list, walking it, and flipping private mode. Normalizing here rather than adding
+      // branches means the two can never drift apart. ⌥/⌘ combos are left alone.
+      let key = e.key;
+      if (e.ctrlKey && !e.metaKey && !e.altKey) {
+        const c = key.toLowerCase();
+        if (c === 'n') key = 'ArrowDown';
+        else if (c === 'p') key = 'ArrowUp';
+      }
+      if (key === 'ArrowDown') {
+        e.preventDefault();
+        if (!open) openList(); else move(1);
+      } else if (key === 'ArrowUp') {
+        // ↑ walks the list while a row is highlighted, and flips private mode otherwise. `sel === -1`
+        // means you have already arrowed back OFF the list and into the input, so ↑ there belongs to
+        // the input again — without this it clamped at -1 and swallowed every further press. The list
+        // is left open on the flip: its contents don't depend on the mode, and closing it would be an
+        // extra side effect nobody asked for (Escape is how you close it).
+        // Tradeoff accepted knowingly: Tahoe Spotlight, Alfred and Raycast all put query recall on
+        // ↑, so that muscle memory lands here — but the indicator makes it obvious and ↑ undoes it.
+        e.preventDefault();
+        if (open && sel >= 0) move(-1); else setPrivate(!priv);
+      } else if (key === 'PageDown') {
+        if (open) { e.preventDefault(); move(pageStep()); }
+      } else if (key === 'PageUp') {
+        if (open) { e.preventDefault(); move(-pageStep()); }
+      } else if (key === 'Home') {
+        if (open && items.length) { e.preventDefault(); sel = 0; highlight(); }
+      } else if (key === 'End') {
+        if (open && items.length) { e.preventDefault(); sel = items.length - 1; highlight(); }
+      } else if (key === 'Enter') {
+        e.preventDefault();
+        run((open && sel >= 0) ? items[sel] : input.value);
+      } else if ((e.metaKey || e.ctrlKey) && (key === 'z' || key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) document.execCommand('redo');
+        else undo();
+      } else if (key === 'Escape') {
+        // Three stages, innermost first — Spotlight's clear-then-dismiss, with our dropdown on
+        // top. Clearing wipes the stash as well, so this is also how you revoke a draft.
+        e.preventDefault();
+        if (open) closeList();
+        else if (input.value !== '') clearInput();
+        else window.launcher.hide();
+      } else if (key === 'Delete') {
+        if (open && sel >= 0) { e.preventDefault(); deleteSel(); }
+      } else if (key === 'Backspace') {
+        // Cmd+Backspace always, or plain Backspace when the box is empty, deletes the entry.
+        if (open && sel >= 0 && (e.metaKey || input.value === '')) { e.preventDefault(); deleteSel(); }
+      }
+    });
+
+    input.addEventListener('input', (e) => {
+      dirty = true;
+      // Mid-composition the value is half-built romaji/pinyin — stash only committed text.
+      if (!e.isComposing) reportDraft();
+      if (open) refilter();
+    });
+    input.addEventListener('compositionend', reportDraft);
+
+    function reset() {
+      input.value = '';
+      open = false; items = []; sel = -1;
+      dirty = false;
+      priv = false;
+      paintMode();
+      list.hidden = true; list.innerHTML = '';
+      live.textContent = '';
+    }
+
+    paintMode(); // the bar paints once before the first 'launcher-shown' ever arrives
+
+    // Clear the dropdown/input while hidden (main sized the window back to 72) — this is
+    // what prevents the old list flashing on the next open.
+    window.launcher.onReset(reset);
+
+    // Collapsed bar every time it's summoned, prefilled with whatever was in it when it went
+    // away — Spotlight's model: the field persists until something explicitly clears it. The text
+    // arrives SELECTED, so typing replaces it and a fresh query costs no extra keystroke, while
+    // Escape (stage 2) clears it if you want it gone. Assigned directly rather than via
+    // insertText: prefilling is not an edit of yours, so `dirty` must stay false.
+    window.launcher.onShown((state) => {
+      const draft = state && state.draft;
+      reset();
+      // Restore the sticky mode directly rather than through setPrivate(): this isn't a flip, so it
+      // must not re-announce to VoiceOver, must not echo the mode back to main, and must not touch
+      // the draft mirror (a private bar has no stashed draft to retract in the first place).
+      priv = !!(state && state.private);
+      paintMode();
+      if (draft) { input.value = draft; }
+      window.launcher.resize(72);
+      input.focus();
+      if (draft) input.select();
+    });
+  </script>
+</body>
+</html>

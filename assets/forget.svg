@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 684 116" width="684" role="img" aria-label="The same launcher bar in forget mode: the panel is indigo instead of near-black and a violet pill reading NO MEMORY sits at the top right.">
+  <defs><filter id="sh" x="-30%" y="-30%" width="160%" height="160%">
+    <feDropShadow dx="0" dy="12" stdDeviation="11" flood-color="#000" flood-opacity="0.45"/>
+  </filter></defs>
+  <rect x="22" y="22" width="640" height="72" rx="16" fill="#281a42" filter="url(#sh)"/>
+  <text x="48" y="66.4" font-family="ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace" font-size="24" font-weight="400" fill="#9b86c4">↓ history · ↑ remember / ⌃N · ⌃P</text>
+  <rect x="542" y="44" width="96" height="24" rx="12" fill="#a06eff" fill-opacity="0.22" stroke="#b48cff" stroke-opacity="0.45"/>
+  <text x="590" y="60" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" font-weight="700" fill="#d9c2ff" text-anchor="middle" letter-spacing="1.1">NO MEMORY</text>
+</svg>
