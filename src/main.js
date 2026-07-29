@@ -703,7 +703,12 @@ function buildTrayMenu() {
   }
   items.push({ label: 'Ask AI Mode…', accelerator: activeHotkey || undefined, registerAccelerator: false, click: () => showLauncher() });
   if (settings.lastSaveDir) items.push({ label: 'Open Last Save Folder', click: () => shell.openPath(settings.lastSaveDir) });
-  items.push({ label: 'Settings…', click: () => openSettings() });
+  // Display-only, like the hotkey on "Ask AI Mode…" above: tray-menu accelerators aren't live key
+  // equivalents on macOS, and ⌘, is already wired per-window (launcher, AI window, find bar) since
+  // the app has no application menu. registerAccelerator:false makes that explicit — it's ignored
+  // on macOS but keeps the two items consistent, and stops the shortcut being double-registered on
+  // platforms where tray accelerators DO bind.
+  items.push({ label: 'Settings…', accelerator: 'CommandOrControl+,', registerAccelerator: false, click: () => openSettings() });
   items.push({ type: 'separator' });
   items.push({ label: `Quit ${APP_NAME}`, click: () => app.quit() });
   // Clicking the menu-bar icon opens a standard dropdown; the hotkey stays the fast path.
