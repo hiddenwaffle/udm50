@@ -478,6 +478,15 @@ function installContextMenu(win) {
 function createLauncher() {
   const win = new BrowserWindow({
     width: 640, height: 72,
+    // `type: 'panel'` is THE fix for macOS 26, and it works by not fighting. Electron's
+    // native_window_mac.mm gates activation on `if (!IsPanel())` in both Show() and Focus() —
+    // commented in-source as enabling "Spotlight-like experiences" — so a panel window is made key
+    // WITHOUT the app ever requesting activation. That matters because activation requests are
+    // exactly what modern macOS refuses: `activateIgnoringOtherApps:` has had its ignoringOtherApps
+    // flag INERT since macOS 14, so app.focus({steal:true}) and {steal:false} are now the same call,
+    // and Apple has confirmed the refusal is deliberate. You cannot win that fight; you can decline
+    // to enter it. Undocumented in the TypeScript typings, implemented in the native code.
+    ...(process.platform === 'darwin' ? { type: 'panel', roundedCorners: false } : {}),
     frame: false, transparent: true, resizable: false,
     show: false, alwaysOnTop: true, skipTaskbar: true,
     fullscreenable: false, minimizable: false, maximizable: false,
@@ -488,7 +497,11 @@ function createLauncher() {
   });
   win._armed = false; // set true shortly after show, so a transient blur during activation can't dismiss it
   win.loadFile(path.join(__dirname, 'launcher.html'));
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // A panel force-ORs CanJoinAllSpaces | FullScreenAuxiliary into its own collection behaviour, so
+  // asking again is redundant — and each call runs TransformProcessType, which is churn we do not
+  // want on the summon path. If the bar stops appearing over full-screen apps, this is the line to
+  // put back, unconditionally.
+  if (process.platform !== 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   // Dismiss on genuine focus loss (click-away / Space switch). Guarded so the transient blur that
   // can fire while we activate the app during show doesn't destroy the bar, and so a superseded
@@ -572,28 +585,35 @@ function showLauncher() {
     win.setPosition(Math.round(wa.x + (wa.width - w) / 2), Math.round(wa.y + wa.height * 0.20));
 
     if (DEBUG_SUMMON) dlog('[reveal:launcher] as-found —', JSON.stringify(revealSnapshot(win)));
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    // BECOME A REGULAR APP BEFORE ACTIVATING. An accessory app (menu-bar only, no Dock icon) is the
-    // weakest possible case for taking focus, and on macOS 14+ activateIgnoringOtherApps no longer
-    // reliably lets a background app steal activation at all — it fails SILENTLY. Proven on a second
-    // machine 2026-07-28: the reveal snapshot showed appActive:false and focusedId:null AFTER
-    // app.focus({steal:true}) had run, and `[app] became active` did not appear in the log until the
-    // user clicked the bar seven seconds later. The AI window path never had this bug because
-    // bringForward() calls setRegular() first — this is that same missing step.
-    // hideLauncher drops us back to accessory, so the Dock icon only exists while the bar is up.
-    setRegular();
+    // Deliberately just show(). On the panel path Electron's show() is a bare makeKeyAndOrderFront:
+    // with NO activation request, which is the entire point — see createLauncher. The old sequence
+    // here (setVisibleOnAllWorkspaces + app.focus({steal:true}) + win.focus()) is what failed on
+    // macOS 26.5: measured on the affected machine, the snapshot read appActive:false and
+    // focusedId:null immediately AFTER those calls, and the app only became active when the user
+    // clicked. Retrying, reordering, or escalating to a regular app (tried: the Dock icon appeared
+    // and focus still stayed put) cannot help, because the request itself is refused.
     win.show();
-    // Unconditional. It used to be gated on `!appActive`; the gate was not the cause here (the flag
-    // read false), but it was already recorded as not fixing the flash it was added for, and a bar
-    // that silently declines to take the keyboard is the worst thing this code can do.
-    app.focus({ steal: true });
-    win.focus();
     win.webContents.focus();                    // ensure keystrokes go to the input
     // Carries the draft AND the sticky mode so the renderer can paint both in the same tick it
     // focuses — an invoke() round-trip would let a normal-looking empty bar paint first and then
     // flip to private a frame later, which is exactly the flicker you don't want on this control.
     win.webContents.send('launcher-shown', { draft: lastDraft, private: lastPrivate });
     setTimeout(() => { if (!win.isDestroyed() && launcher === win) win._armed = true; }, 150);
+
+    // The right question for a panel is "did the WINDOW become key", not "did the APP become
+    // active" — on this path the app deliberately never activates, so the menu bar keeps saying
+    // Terminal and app.isActive() stays false. That is success, not failure. (The previous version
+    // of this check retried app.focus() whenever the app was inactive, which under a panel would
+    // fire on every single summon and re-introduce the activation request we just removed.)
+    if (process.platform === 'darwin') {
+      setTimeout(() => {
+        if (win.isDestroyed() || launcher !== win) return;
+        const key = win.isFocused();
+        if (DEBUG_SUMMON) dlog('[launcher] panel key check —', JSON.stringify({ key, appActive: app.isActive() }));
+        if (!key) dwarn('[launcher] the panel did not become key — typing will go to the previous app.',
+          'type:\'panel\' is not working on this macOS; click the bar to type.');
+      }, 180);
+    }
     if (DEBUG_SUMMON) dlog('[reveal:launcher] EXPECT no-jump (fresh window, born on current Space) —', JSON.stringify(revealSnapshot(win)));
   };
 
@@ -613,6 +633,9 @@ function showLauncher() {
 let appHidden = false;
 function yieldActivation(ignore) {
   if (process.platform !== 'darwin') return;
+  // Nothing to give back if we never took it. On the panel path the app stays inactive the whole
+  // time the bar is up, so hiding it would be a no-op at best and churn at worst.
+  if (!app.isActive()) return;
   const others = BrowserWindow.getAllWindows()
     .filter((w) => w !== ignore && !w.isDestroyed() && w.isVisible());
   if (others.length) return;
@@ -641,12 +664,7 @@ function hideLauncher(yieldFocus) {
   launcher = null;   // clear ref first so the window's own blur/close handlers no-op
   if (yieldFocus) yieldActivation(w);
   w.destroy();       // fully close it; the next summon builds a fresh one on the current Space
-  // Back to menu-bar-only. reveal() escalates to a regular app so it can take focus at all; without
-  // this the Dock icon would stay behind after the bar is gone. Gated on `yieldFocus`, i.e. genuine
-  // dismissals: the submit path is about to open the AI window, which wants regular anyway, and
-  // flipping accessory→regular milliseconds apart is pointless churn in the flash-prone code.
-  // (Submitting an EMPTY query opens nothing, so that path restores accessory itself.)
-  if (yieldFocus && (!aiWindow || aiWindow.isDestroyed())) setAccessory();
+  // (The bar no longer escalates to a regular app, so there is no Dock icon to take back down here.)
 }
 
 function toggleLauncher() {
@@ -1375,7 +1393,7 @@ ipcMain.on('submit-query', (_e, payload) => {
   // Tolerate the old string form so a stale renderer can't wedge submission.
   const isPrivate = !!(payload && typeof payload === 'object' && payload.private);
   const q = String((payload && typeof payload === 'object' ? payload.query : payload) || '').trim();
-  if (!q) { setAccessory(); return; } // nothing is opening — drop the Dock icon reveal() added
+  if (!q) return;
   if (!isPrivate) addHistory(q); // a private query leaves no trace in the recall list
   showAiMode(q, { private: isPrivate }).catch((e) => derror('[ai] open failed', String(e)));
 });
