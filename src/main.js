@@ -508,6 +508,10 @@ function createLauncher() {
   // window's late blur can't dismiss the current one.
   win.on('blur', () => {
     if (!win._armed || launcher !== win) return;
+    // Mid-submit the bar is deliberately still alive as an activation anchor, and it WILL blur when
+    // the AI window takes focus. Dismissing here would be harmless, but yielding activation
+    // (app.hide()) would hand the foreground straight back to the app we came from.
+    if (win._submitting) return;
     if (DEBUG_SUMMON) dlog('[launcher] blur → hide');
     hideLauncher(true);
   });
@@ -742,6 +746,9 @@ function setAccessory() {
 function bringForward(win, fresh) {
   reclaimActivation(); // a hidden app can show a window without becoming active
   setRegular(); // Dock + Cmd+Tab membership
+  // Show FIRST, then release the launcher anchor (see submit-query): the handoff has to overlap, or
+  // the app briefly owns no window and macOS takes the foreground away — which it will not give
+  // back. The 'focus' handler on the AI window also clears the bar, so this is belt and braces.
   if (DEBUG_SUMMON) {
     const expect = fresh
       ? 'no-jump (fresh window, shown on the current Space)'
@@ -751,6 +758,9 @@ function bringForward(win, fresh) {
   win.show();
   win.focus();
   app.focus({ steal: true }); // activate our app so keystrokes land in the window
+  // Now that a real window is up and key, drop the invisible launcher anchor. Order matters: doing
+  // this before show() reopens the zero-window gap that lost us the foreground in the first place.
+  if (launcher && !launcher.isDestroyed()) hideLauncher();
   if (DEBUG_SUMMON) dlog('[reveal:ai] done —', JSON.stringify(revealSnapshot(win)));
 }
 
@@ -1388,12 +1398,30 @@ app.whenReady().then(() => {
 
 // Launcher submit → remember in history + open AI Mode.
 ipcMain.on('submit-query', (_e, payload) => {
-  hideLauncher();
+  // DO NOT destroy the bar here. On macOS 26 an app that drops to zero windows is deactivated
+  // within a frame or two, and getting activation BACK is refused (see createLauncher) — which is
+  // exactly what was happening: the bar was torn down, Terminal came forward during the ~600ms the
+  // query took to load, and the AI window then opened behind it. Keeping the bar alive but
+  // invisible holds our foothold, so the AI window INHERITS focus instead of re-requesting it.
+  // It is destroyed by whichever comes first: the AI window taking focus, bringForward, or the
+  // failsafe below.
+  const anchor = launcher;
+  if (anchor && !anchor.isDestroyed()) {
+    anchor._submitting = true;          // its blur must not dismiss us or hand activation back
+    anchor.setOpacity(0);               // visually gone immediately; still a window as far as macOS cares
+    anchor.setIgnoreMouseEvents(true);  // ...and not clickable while it lingers
+    // Failsafe: if the AI window never arrives (load failure, seeding hang), don't leak an
+    // invisible always-on-top window forever.
+    setTimeout(() => { if (launcher === anchor) hideLauncher(); }, 10000);
+  }
   lastDraft = clearedDraft = ''; // submitted text belongs to history (↓), not to the draft slots
   // Tolerate the old string form so a stale renderer can't wedge submission.
   const isPrivate = !!(payload && typeof payload === 'object' && payload.private);
   const q = String((payload && typeof payload === 'object' ? payload.query : payload) || '').trim();
-  if (!q) return;
+  // Enter on an empty box opens nothing, so no AI window will ever arrive to clear the anchor —
+  // tear it down now rather than leaving an invisible always-on-top window until the failsafe.
+  // Treat it as a dismissal and hand the foreground back.
+  if (!q) { hideLauncher(true); return; }
   if (!isPrivate) addHistory(q); // a private query leaves no trace in the recall list
   showAiMode(q, { private: isPrivate }).catch((e) => derror('[ai] open failed', String(e)));
 });
