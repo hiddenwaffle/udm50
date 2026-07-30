@@ -10,13 +10,12 @@ there rather than restating it, so the two files cannot drift apart.
 
 Believed done, never actually confirmed.
 
-- [ ] **⌘Q no longer quits the app.** Fixed 2026-07-29, untested. Electron installs a default
-      application menu unless you set one, and its ⌘Q was `role:'quit'` — the three per-window
-      handlers only intercepted the key when a page of ours had the keyboard, so any other moment
-      quit the whole app. An explicit menu now routes ⌘Q and ⌘W to one close-the-front-window
-      action. Confirm: ⌘Q in the mini browser closes only the window; the menu bar reads
-      `udm50 / Edit / View / Window` while it is focused; Quit shows no shortcut; ⌘C, ⌘V, ⌘R, ⌘H
-      and the zoom items still work.
+- [ ] **The shortcuts carried over from Electron's default menu.** The ⌘Q fix itself is CONFIRMED
+      (2026-07-29: ⌘Q with Settings focused closes only Settings — that window has no key handler of
+      its own, so before the fix it took the whole app down every time). Untested is the rest of the
+      authored menu: ⌘C, ⌘V, ⌘Z, ⌘R, ⌘H, zoom and full screen were transcribed from the default by
+      hand, so any one of them could have been dropped on the way. They surface in ordinary use —
+      no test needed, just notice.
 - [ ] **Forget mode cookie seeding.** Rewritten after the first version turned out to copy a
       cookie that does not exist; not run since. First forget-mode query prints
       `[private] seeded N/M google.com cookies` — `0` means it is still broken. See README,
