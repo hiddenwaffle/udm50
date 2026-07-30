@@ -516,19 +516,15 @@ function createLauncher() {
     hideLauncher(true);
   });
 
-  // Cmd+Q / Cmd+W dismiss the bar rather than quitting the app; Cmd+, opens Settings.
+  // Cmd+Q / Cmd+W dismiss the bar rather than quitting the app; Cmd+, opens Settings. The
+  // application menu binds the same three keys to the same actions (see buildAppMenu): this handler
+  // is the fast path for when the bar has the keyboard, the menu is what makes them reliable when it
+  // doesn't.
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !input.meta) return;
     const k = (input.key || '').toLowerCase();
     if (k === 'q' || k === 'w') { event.preventDefault(); hideLauncher(true); }
-    else if (k === ',') {
-      // Dismiss the bar first, the way a menu command would: Settings is a real window, and
-      // leaving a transient always-on-top panel floating over it looks broken. No focus yield
-      // here — we're about to raise a window of our own.
-      event.preventDefault();
-      hideLauncher();
-      openSettings();
-    }
+    else if (k === ',') { event.preventDefault(); openSettingsFront(); }
   });
 
   installContextMenu(win);
@@ -537,16 +533,41 @@ function createLauncher() {
 
 const DEBUG_SUMMON = false; // set true to re-enable the [summon]/[save] diagnostics
 
+// ---------------------------------------------------------------------------
+// Diagnostics: a log FILE, not just whatever terminal you launched from
+// ---------------------------------------------------------------------------
+// `npm start` prints to a terminal, so the one question you actually want answered later — "the app
+// disappeared, what happened?" — dies with that window. Every dlog/dwarn/derror line is mirrored to
+// .userdata/diagnostics.log (gitignored), together with the events a vanished app leaves no other
+// trace of: who initiated a quit, and any main-process exception (both at the bottom of this file).
+// appendFileSync deliberately — a buffered stream loses its tail on exit, which is exactly the part
+// worth keeping. Rotates at LOG_MAX so it can't grow forever, and every failure in here is
+// swallowed: logging must never be the thing that breaks the app.
+const LOG_FILE = path.join(ROOT, '.userdata', 'diagnostics.log');
+const LOG_MAX = 512 * 1024;
+let logChecked = false;
+function logLine(level, text) {
+  try {
+    if (!logChecked) {
+      logChecked = true;
+      fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+      try { if (fs.statSync(LOG_FILE).size > LOG_MAX) fs.renameSync(LOG_FILE, `${LOG_FILE}.1`); } catch (_) {}
+    }
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} ${level} ${text}\n`);
+  } catch (_) { /* a broken log must never break the app */ }
+}
+
 // Timestamped console helpers. Prefix every line with HH:MM:SS.mmm so the reveal / focus /
-// activation timeline is readable — you can see not just WHAT fired but WHEN.
+// activation timeline is readable — you can see not just WHAT fired but WHEN. The file copy gets a
+// full ISO date instead: a log read days later has to say which day.
 function ts() {
   const d = new Date();
   const p = (n, w = 2) => String(n).padStart(w, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
-function dlog(...args) { console.log(ts(), ...args); }
-function dwarn(...args) { console.warn(ts(), ...args); }
-function derror(...args) { console.error(ts(), ...args); }
+function dlog(...args) { const s = args.map(String).join(' '); console.log(ts(), s); logLine('INFO', s); }
+function dwarn(...args) { const s = args.map(String).join(' '); console.warn(ts(), s); logLine('WARN', s); }
+function derror(...args) { const s = args.map(String).join(' '); console.error(ts(), s); logLine('ERROR', s); }
 
 // Snapshot the observable state around a reveal. macOS gives us no way to read the current
 // Space number, so we log everything we CAN see — the all-Spaces flag (prime suspect: if it
@@ -686,6 +707,111 @@ function toggleLauncher() {
 }
 
 // ---------------------------------------------------------------------------
+// Application menu — mostly here to defuse ⌘Q
+// ---------------------------------------------------------------------------
+// Electron INSTALLS A DEFAULT APPLICATION MENU on macOS unless the app sets one — documented on
+// Menu.setApplicationMenu ("the default menu will be created automatically if the app does not set
+// one") — and that default binds ⌘Q to role:'quit', i.e. quit the whole app. This app is a menu-bar
+// resident: closing the mini browser must never take it down. That's why the tray's Quit carries no
+// accelerator, and why three before-input-event handlers (launcher, AI window, find bar) each
+// preventDefault ⌘Q. But until 2026-07-29 the tray comment below asserted that "the app has no
+// application menu", so this menu was never authored and ⌘Q kept a live path to app.quit().
+//
+// Interception cannot close that hole, because before-input-event only fires for keystrokes routed
+// into a web view we own. That BOTH paths are live is settled by the symptom itself: if the menu
+// always won, ⌘Q would quit every single time; if interception always won it could never quit at
+// all. "Sometimes" means the keystroke sometimes reaches the page handler and sometimes doesn't —
+// and the times it doesn't are the ones where focus isn't in a page of ours: Settings is up, a
+// native save dialog just closed, a page is mid-navigation between render widgets, or the app is
+// frontmost with no window at all (the state described above yieldActivation).
+//
+// role:'editMenu' below keeps ⌘Z bound to role:'undo', which an earlier note warned would shadow the
+// bar's own ⌘Z draft-restore. It doesn't: that role has been live in the default menu the entire
+// time, alongside a working draft-restore, so including it changes nothing. If draft-restore ever
+// does stop firing, that role is the first suspect and the fix is to spell the Edit menu out without
+// undo/redo.
+//
+// So: authored explicitly, ⌘Q bound to the same close-the-front-window action as ⌘W, Quit beside it
+// unaccelerated. Everything that carries a SHORTCUT is deliberately reproduced from the default, so
+// the mini browser keeps what it has today (the Edit roles, ⌘R, zoom, full screen, ⌘H); the
+// shortcutless decoration is not (no Services or About — the About panel would read "Electron"
+// under `npm start` anyway). Menu.setApplicationMenu(null) would disarm ⌘Q too, but it takes all of
+// the above with it.
+
+// ⌘W and ⌘Q both land here. Mirrors the per-window handlers rather than using role:'close', so the
+// menu path and the interception path cannot disagree: the bar DISMISSES and hands activation back
+// (role:'close' would merely destroy it, leaving the app you came from half-focused — see
+// yieldActivation), the find bar acts on the window it is searching, anything else closes. Mid-submit
+// the bar is deliberately alive as an invisible activation anchor (see submit-query) — closing it
+// there would drop the foreground during the handoff, so that one is left to bringForward.
+function closeFrontWindow() {
+  const bar = (launcher && !launcher.isDestroyed()) ? launcher : null;
+  if (bar && !bar._submitting) { hideLauncher(true); return; }
+  const w = BrowserWindow.getFocusedWindow();
+  // `w === bar` is the anchor: invisible, still focused, and the only thing holding the foreground
+  // until the AI window appears. Closing it here is the exact bug the anchor was added to fix.
+  if (!w || w.isDestroyed() || w === bar) return;
+  if (w === findBarWin && aiWindow && !aiWindow.isDestroyed()) { aiWindow.close(); return; }
+  w.close();
+}
+
+// ⌘, from anywhere. The menu item and all three per-window handlers route through here so they can't
+// drift apart. The bar is dismissed first, the way a menu command would: Settings is a real window,
+// and leaving a transient always-on-top panel floating over it looks broken. No focus yield — we're
+// about to raise a window of our own.
+function openSettingsFront() {
+  if (launcher && !launcher.isDestroyed() && !launcher._submitting) hideLauncher();
+  openSettings();
+}
+
+function buildAppMenu() {
+  // Windows/Linux: nothing to defuse (no ⌘Q quit role) and no menu bar wanted on a frameless bar.
+  if (process.platform !== 'darwin') { Menu.setApplicationMenu(null); return; }
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: APP_NAME,
+      submenu: [
+        { label: 'Settings…', accelerator: 'Command+,', click: () => openSettingsFront() },
+        { type: 'separator' },
+        // Custom rather than role:'hide', so our own hidden-state bookkeeping stays truthful:
+        // yieldActivation/reclaimActivation track whether WE hid the app, and a window shown while
+        // NSApp is hidden simply doesn't appear — a state macOS 26 can't be talked out of, since
+        // re-activation is refused (see createLauncher). role:'hide' would hide us behind that flag's
+        // back and leave the hotkey looking dead.
+        { label: `Hide ${APP_NAME}`, accelerator: 'Command+H', click: () => { appHidden = true; app.hide(); } },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        // No accelerator, exactly like the tray's Quit: taking the app down is a deliberate act, not
+        // a slip of the key that closes a window. role:'quit' is avoided for the same reason — the
+        // role is what carries ⌘Q.
+        { label: `Quit ${APP_NAME}`, click: () => app.quit() },
+        // Invisible, and here only so ⌘Q has somewhere harmless to land. On macOS a hidden item's key
+        // equivalent still fires — acceleratorWorksWhenHidden defaults to true, stated anyway because
+        // the whole fix rests on it — which is the standard way to bind a key without inventing a
+        // duplicate visible entry.
+        {
+          label: 'Close Window', accelerator: 'Command+Q', visible: false,
+          acceleratorWorksWhenHidden: true, click: () => closeFrontWindow()
+        }
+      ]
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    {
+      label: 'Window',
+      submenu: [
+        { label: 'Close Window', accelerator: 'Command+W', click: () => closeFrontWindow() },
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' }
+      ]
+    }
+  ]));
+}
+
+// ---------------------------------------------------------------------------
 // Menu-bar (tray) residency — the app lives in the top-right, not the Dock.
 // ---------------------------------------------------------------------------
 
@@ -704,8 +830,8 @@ function buildTrayMenu() {
   items.push({ label: 'Ask AI Mode…', accelerator: activeHotkey || undefined, registerAccelerator: false, click: () => showLauncher() });
   if (settings.lastSaveDir) items.push({ label: 'Open Last Save Folder', click: () => shell.openPath(settings.lastSaveDir) });
   // Display-only, like the hotkey on "Ask AI Mode…" above: tray-menu accelerators aren't live key
-  // equivalents on macOS, and ⌘, is already wired per-window (launcher, AI window, find bar) since
-  // the app has no application menu. registerAccelerator:false makes that explicit — it's ignored
+  // equivalents on macOS. The live ⌘, is the application menu's Settings item (see buildAppMenu),
+  // backed by the per-window handlers. registerAccelerator:false makes that explicit — it's ignored
   // on macOS but keeps the two items consistent, and stops the shortcut being double-registered on
   // platforms where tray accelerators DO bind.
   items.push({ label: 'Settings…', accelerator: 'CommandOrControl+,', registerAccelerator: false, click: () => openSettings() });
@@ -1213,12 +1339,18 @@ async function showAiMode(query, opts) {
     aiWindow.on('close', () => saveAiBounds(true));
     // UA is set at the session level in hardenSession() (also covers subresources).
     aiWindow.on('closed', () => {
+      // Logged unconditionally: this is the line a QUIT entry has to be read against, since "closing
+      // the mini browser closed the whole app" is only diagnosable if both events are in the file.
+      logLine('INFO', 'ai window closed');
       if (findBarWin && !findBarWin.isDestroyed()) findBarWin.destroy();
       findBarWin = null;
       aiWindow = null;
       setAccessory();
       if (DEBUG_SUMMON) dlog('[dock] hide → accessory (menu-bar only)');
-      enforceCacheCap(); // trim cache back under the "max saved data" limit
+      // Trim cache back under the "max saved data" limit. Un-awaited on purpose (nothing waits on a
+      // closed window) but NOT un-caught: an unhandled rejection on the close path is the other way
+      // an app can go away without explaining itself.
+      enforceCacheCap().catch((e) => derror('[cache] enforce failed', String(e)));
     });
 
     // Clicking into the AI window should dismiss the launcher too — its own 'blur' doesn't
@@ -1256,7 +1388,7 @@ async function showAiMode(query, opts) {
       }
       if (k === ',') {
         event.preventDefault();   // ⌘, — Settings, as in every other Mac app
-        openSettings();
+        openSettingsFront();
       } else if (k === 'q' || k === 'w') {
         event.preventDefault();
         if (aiWindow) aiWindow.close();
@@ -1378,6 +1510,11 @@ applyCacheLimit();
 
 app.whenReady().then(() => {
   setAccessory(); // menu-bar-only app at startup: no Dock icon, out of Cmd+Tab
+  // Replace Electron's default menu — the one that binds ⌘Q to quit — before any window can exist,
+  // so that binding is never reachable. Electron installs its default on ready too, and its handler
+  // was registered before ours, so this is a swap rather than a first install; the window that would
+  // be needed to type ⌘Q into isn't there yet either way.
+  buildAppMenu();
 
   // Harden the AI partition (where Google loads) and the default session (launcher):
   // deny all permissions, force en-US, set the clean Chrome UA.
@@ -1469,7 +1606,9 @@ ipcMain.handle('settings:save', (_e, incoming) => {
     if (typeof incoming.rewriteRedditLinks === 'boolean') settings.rewriteRedditLinks = incoming.rewriteRedditLinks;
   }
   saveSettings();
-  enforceCacheCap(); // trim now if the new (possibly lower) cap is already exceeded
+  // Trim now if the new (possibly lower) cap is already exceeded. Caught for the same reason as the
+  // call on the window-close path: an un-awaited async call is an unhandled rejection waiting to be.
+  enforceCacheCap().catch((e) => derror('[cache] enforce failed', String(e)));
   const result = applyHotkey();
   buildTrayMenu();
   return { ...result, settings };
@@ -1571,7 +1710,7 @@ function openFindBar() {
       else if (k === 'g') { event.preventDefault(); findBarWin.webContents.send('find:again', !!input.shift); }
       else if (k === 'q' || k === 'w') { event.preventDefault(); if (aiWindow) aiWindow.close(); }
       else if (k === 's') { event.preventDefault(); if (aiWindow) saveTranscript(aiWindow, { saveAs: input.shift }); }
-      else if (k === ',') { event.preventDefault(); openSettings(); }
+      else if (k === ',') { event.preventDefault(); openSettingsFront(); }
     });
   }
   positionFindBar();
@@ -1612,7 +1751,27 @@ ipcMain.on('find:stop', (e) => {
 });
 ipcMain.on('find:close', () => closeFindBar());
 
+// Every quit, recorded — "the app just closed and I don't know why" was unanswerable before this.
+// The stack is the useful half: a quit from the tray shows this module's own frames, a quit fired by
+// a menu key equivalent shows Electron's internals and none of ours, and a quit nobody asked for
+// shows neither. The state line says what was on screen at the time, which is what distinguishes
+// "closed the mini browser" from "pressed a key with focus nowhere".
+app.on('before-quit', () => {
+  const f = BrowserWindow.getFocusedWindow();
+  const state = JSON.stringify({
+    focusedId: f ? f.id : null, ai: !!aiWindow, bar: !!launcher, settings: !!settingsWin, active: app.isActive()
+  });
+  logLine('QUIT', `before-quit ${state}\n${new Error('quit initiated here').stack}`);
+});
+app.on('quit', (_e, code) => logLine('QUIT', `quit — exit code ${code}`));
 app.on('will-quit', () => globalShortcut.unregisterAll());
+
+// A resident menu-bar app disappearing without a word is the worst failure it has, so neither of
+// these is left to chance. NOTE: registering an 'unhandledRejection' listener also makes stray
+// rejections NON-fatal — Node's default since v15 is to promote them to an uncaught exception — and
+// that is deliberate here: running slightly degraded beats vanishing mid-query.
+process.on('uncaughtException', (err) => logLine('FATAL', `uncaughtException — ${(err && err.stack) || err}`));
+process.on('unhandledRejection', (reason) => logLine('FATAL', `unhandledRejection — ${(reason && reason.stack) || reason}`));
 
 // Stay alive as a menu-bar app even when the AI window is closed. Quitting is done
 // from the tray (right-click ✦ → Quit); closing the AI window must NOT quit the app.

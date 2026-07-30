@@ -255,6 +255,12 @@ get diagnosed.
 `DEBUG_SUMMON` in `src/main.js` turns on timestamped window-activation tracing. It is off by
 default and worth flipping on if focus or Space-switching behaves oddly.
 
+Everything the app logs is also appended to `.userdata/diagnostics.log`, which is where to look
+when something has already happened and the terminal no longer remembers it. Regardless of
+`DEBUG_SUMMON`, that file records who initiated a quit (with a stack trace), every main-process
+exception, and each time the AI Mode window closed — enough to tell "I closed the window" apart
+from "something quit the app". It rotates to `.log.1` past 512 KB.
+
 ## Sources
 
 - https://raw.githubusercontent.com/chromium/chromium/main/chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.cc
@@ -273,7 +279,8 @@ only `GOOGLE_ABUSE_EXEMPTION`, on the theory that it was the token keeping Googl
 away. It is not — inspecting the real jar showed no such cookie exists at all, because
 Google only issues it once you have solved a CAPTCHA. What actually carries the session is
 the ordinary `google.com` jar, so seeding now copies that instead. That change has not been
-run yet. The tell is a line on stdout at the first forget-mode query:
+run yet. The tell is a line on stdout — and in `.userdata/diagnostics.log` — at the first
+forget-mode query:
 
 ```
 [private] seeded 8/8 google.com cookies
