@@ -46,7 +46,9 @@ npm install
 npm start
 ```
 
-The app lives in the menu bar as a `✦` icon. There is no Dock icon until an AI Mode
+The app lives in the menu bar as a `✦` icon, and that icon's menu is the only way to quit
+it — no window closes the app, and the application menu offers a close where you would
+expect Quit. There is no Dock icon until an AI Mode
 window is open. It stores everything inside the project directory, not in
 `~/Library` — cookies and cache in `.userdata/`, query history in `transcript/`. Both
 are gitignored. Deleting `.userdata/` resets the app completely.

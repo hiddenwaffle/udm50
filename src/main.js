@@ -731,8 +731,9 @@ function toggleLauncher() {
 // does stop firing, that role is the first suspect and the fix is to spell the Edit menu out without
 // undo/redo.
 //
-// So: authored explicitly, ⌘Q bound to the same close-the-front-window action as ⌘W, Quit beside it
-// unaccelerated. Everything that carries a SHORTCUT is deliberately reproduced from the default, so
+// So: authored explicitly, ⌘Q bound to the same close-the-front-window action as ⌘W, and no quit item
+// in it at all — the tray menu is the only way to quit. Everything that carries a SHORTCUT is
+// deliberately reproduced from the default, so
 // the mini browser keeps what it has today (the Edit roles, ⌘R, zoom, full screen, ⌘H); the
 // shortcutless decoration is not (no Services or About — the About panel would read "Electron"
 // under `npm start` anyway). Menu.setApplicationMenu(null) would disarm ⌘Q too, but it takes all of
@@ -782,18 +783,13 @@ function buildAppMenu() {
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        // No accelerator, exactly like the tray's Quit: taking the app down is a deliberate act, not
-        // a slip of the key that closes a window. role:'quit' is avoided for the same reason — the
-        // role is what carries ⌘Q.
-        { label: `Quit ${APP_NAME}`, click: () => app.quit() },
-        // Invisible, and here only so ⌘Q has somewhere harmless to land. On macOS a hidden item's key
-        // equivalent still fires — acceleratorWorksWhenHidden defaults to true, stated anyway because
-        // the whole fix rests on it — which is the standard way to bind a key without inventing a
-        // duplicate visible entry.
-        {
-          label: 'Close Window', accelerator: 'Command+Q', visible: false,
-          acceleratorWorksWhenHidden: true, click: () => closeFrontWindow()
-        }
+        // The slot where macOS puts Quit, holding a close instead — deliberate, and the whole point
+        // of this menu. There is NO quit item here at all: the tray menu is the single way to take
+        // the app down (2026-07-29, by request). A menu-bar resident that can be quit by the reflex
+        // ⌘Q, or by the item sitting exactly where ⌘Q's item always sits, is a menu-bar resident that
+        // keeps vanishing. Visible rather than the hidden-item trick, because a menu whose ⌘Q closes
+        // a window should say so where the user looks for it.
+        { label: 'Close Window', accelerator: 'Command+Q', click: () => closeFrontWindow() }
       ]
     },
     { role: 'editMenu' },
