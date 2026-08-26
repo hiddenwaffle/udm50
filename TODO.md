@@ -16,6 +16,11 @@ Believed done, never actually confirmed.
       authored menu: ⌘C, ⌘V, ⌘Z, ⌘R, ⌘H, zoom and full screen were transcribed from the default by
       hand, so any one of them could have been dropped on the way. They surface in ordinary use —
       no test needed, just notice.
+- [ ] **The Dock icon has never been seen on screen.** `applyDockIcon` reads `assets/icon.png`
+      on each `setRegular()`, which is the only moment a Dock icon exists at all. Confirmed to
+      decode as a 1024x1024 PNG, not confirmed to appear: ask any question and look at the Dock.
+      A blank slot there means `nativeImage` refused the file, and the log carries an `[icon]`
+      warning if it did.
 - [ ] **Forget mode cookie seeding.** Rewritten after the first version turned out to copy a
       cookie that does not exist; not run since. First forget-mode query prints
       `[private] seeded N/M google.com cookies` — `0` means it is still broken. See README,
@@ -68,7 +73,13 @@ to your transcripts. Doing these from guesswork is how selectors rot.
 
 - [ ] **Package as a real `.app`.** Currently launched with `npm start` from a terminal.
       Packaging gets launch-at-login and no terminal window, and matters more now that it runs
-      on two machines. electron-builder, unsigned is fine for personal use.
+      on two machines. electron-builder, unsigned is fine for personal use. It is also the only
+      way to fix the icon everywhere it is still wrong: `assets/icon.png` covers the running Dock
+      icon, but Cmd+Tab, Finder and Spotlight read the bundle, which is Electron's. The pieces to
+      copy are in the Grimoire repo (`scripts/package_app.js` and `scripts/png_to_icns.js`), which
+      packages with `@electron/packager`, converts the same PNG to `.icns` with `sips` +
+      `iconutil`, sets `CFBundleIconFile` by hand because packager v20 ignores the icon option,
+      and ad-hoc signs the bundle last.
 - [ ] **Model selection.** A Reddit post claims `arv=1` selected Gemini 2.5 Pro alongside
       `udm=50`. That post is old and the value is probably stale, but if a current equivalent
       exists it would let the launcher request a better model than the default.

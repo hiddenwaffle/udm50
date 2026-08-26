@@ -47,14 +47,15 @@ npm start
 ```
 
 The app lives in the menu bar as a `✦` icon, and that icon's menu is the only way to quit
-it — no window closes the app, and the application menu offers a close where you would
-expect Quit. There is no Dock icon until an AI Mode
-window is open. It stores everything inside the project directory, not in
+it. No window closes the app, and the application menu offers a close where you would
+expect Quit. There is no Dock icon until an AI Mode window is open. It stores everything
+inside the project directory, not in
 `~/Library` — cookies and cache in `.userdata/`, query history in `transcript/`. Both
 are gitignored. Deleting `.userdata/` resets the app completely.
 
 Source lives in `src/` (`main.js` is the Electron main process; `*_preload.js` and the
-HTML files are the renderer side), and the SVGs in this README are in `assets/`.
+HTML files are the renderer side). `assets/` holds this README's SVGs and the app icon,
+`scripts/` the build tooling.
 
 ## Using it
 
@@ -246,6 +247,7 @@ Checked 2026-07-28: `udm=50` is current. Chromium ships the omnibox AI Mode URL 
 
 ```bash
 npm start                    # run it
+npm run icon                 # rebuild the app icon (needs ImageMagick)
 node .scratch/test_walker.js # transcript walker tests, 20 assertions
 ```
 
@@ -253,6 +255,12 @@ The walker tests run the real preload against stub DOM trees, so they cover the
 Markdown conversion without needing a live page. `⌘⇧D` in an AI Mode window dumps the
 answer DOM outline next to your transcripts, which is how new page-structure surprises
 get diagnosed.
+
+The Dock icon comes from `assets/icon.png`, read at runtime by `applyDockIcon`, so replacing that
+file and restarting is all it takes. `npm run icon` regenerates it, drawing the app's own `✦`
+mark by default, or shaping your art if you drop a square image at `assets/icon.src.png`. See
+[assets/format.md](assets/format.md), which also explains why the Cmd+Tab switcher and Finder
+still show Electron's icon until the app is packaged.
 
 `DEBUG_SUMMON` in `src/main.js` turns on timestamped window-activation tracing. It is off by
 default and worth flipping on if focus or Space-switching behaves oddly.

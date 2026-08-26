@@ -851,11 +851,40 @@ function createTray() {
 // (Reveal-on-current-Space now lives in bringForward, done deterministically without the
 // old all-Spaces toggle — see below.)
 
+// The Dock icon, straight from the source image — no .icns needed for the running app. Drop a
+// square PNG/JPG at assets/icon.png (see assets/format.md; `npm run icon` builds one) and both
+// the Dock and, later, a packaged bundle use that same file. nativeImage decodes PNG and JPEG
+// only, which is why the list stops there.
+//
+// Applied on every setRegular rather than once at startup, because this app spends most of its
+// life as an accessory with NO Dock icon at all: the moment the icon appears is the moment worth
+// being sure about. The image is read once and kept — the cost is a cached object, not a file
+// read per call.
+let dockIconImage;
+function applyDockIcon() {
+  if (!app.dock) return;
+  if (dockIconImage === undefined) {
+    const file = ['icon.png', 'icon.jpg', 'icon.jpeg']
+      .map((n) => path.join(ROOT, 'assets', n))
+      .find((p) => fs.existsSync(p));
+    dockIconImage = file ? nativeImage.createFromPath(file) : null;
+    // createFromPath returns an EMPTY image for anything it can't decode, and setIcon on an
+    // empty image is what would leave a blank slot in the Dock — so check, and keep Electron's
+    // default instead.
+    if (dockIconImage && dockIconImage.isEmpty()) {
+      dwarn('[icon] assets image could not be decoded — keeping the default Dock icon');
+      dockIconImage = null;
+    }
+  }
+  if (dockIconImage) app.dock.setIcon(dockIconImage);
+}
+
 // Toggle between a regular app (Dock icon + Cmd+Tab) and a menu-bar-only accessory.
 // setActivationPolicy is the lever that actually governs Cmd+Tab membership on macOS —
 // app.dock.show() alone shows the icon but doesn't reliably add the app to the switcher.
 function setRegular() {
   if (typeof app.setActivationPolicy === 'function') app.setActivationPolicy('regular');
+  applyDockIcon(); // before show(), so the icon never appears as Electron's and then swaps
   if (app.dock) app.dock.show();
 }
 function setAccessory() {

@@ -6,7 +6,8 @@
   "license": "MIT",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "icon": "node scripts/make_icon.js"
   },
   "private": true,
   "dependencies": {
