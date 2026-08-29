@@ -49,9 +49,9 @@ npm start
 The app lives in the menu bar as a `✦` icon, and that icon's menu is the only way to quit
 it. No window closes the app, and the application menu offers a close where you would
 expect Quit. There is no Dock icon until an AI Mode window is open. It stores everything
-inside the project directory, not in
-`~/Library` — cookies and cache in `.userdata/`, query history in `transcript/`. Both
-are gitignored. Deleting `.userdata/` resets the app completely.
+inside the project directory, not in `~/Library` — cookies and cache in `.userdata/`,
+query history in `transcript/`. Both are gitignored. Deleting `.userdata/` resets the app
+completely.
 
 Source lives in `src/` (`main.js` is the Electron main process; `*_preload.js` and the
 HTML files are the renderer side). `assets/` holds this README's SVGs and the app icon,
@@ -269,7 +269,9 @@ Everything the app logs is also appended to `.userdata/diagnostics.log`, which i
 when something has already happened and the terminal no longer remembers it. Regardless of
 `DEBUG_SUMMON`, that file records who initiated a quit (with a stack trace), every main-process
 exception, and each time the AI Mode window closed — enough to tell "I closed the window" apart
-from "something quit the app". It rotates to `.log.1` past 512 KB.
+from "something quit the app". It also times every summon: `[summon] revealed via ...` gives the
+milliseconds from hotkey to the bar appearing, and which of the two reveal triggers got there
+first. It rotates to `.log.1` past 512 KB.
 
 ## Sources
 

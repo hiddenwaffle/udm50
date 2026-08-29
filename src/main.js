@@ -593,14 +593,23 @@ function revealSnapshot(win) {
 }
 
 function showLauncher() {
+  // Start the clock BEFORE any of the work, so the number in the log is the whole summon —
+  // un-hiding the app, tearing the old bar down, building a new window and its renderer — and not
+  // just the tail of it. This is what the user actually feels between the hotkey and the bar.
+  const t0 = Date.now();
   reclaimActivation(); // we may have hidden the app on the last dismiss to give focus back
   // Recreate the bar FRESH each summon so it's born on the current Space (see createLauncher).
   if (launcher && !launcher.isDestroyed()) { const old = launcher; launcher = null; old.destroy(); }
   const win = createLauncher();
   launcher = win;
 
+  // Which of the two triggers below actually revealed the bar. Written to the diagnostics log on
+  // every summon, file only so the terminal stays quiet and so it survives being noticed days
+  // later on a machine nobody was watching. The bar is meant to appear on ready-to-show; a log
+  // full of `fallback` means that event never fires here and the 250ms timer IS the delay, a
+  // fixed quarter second added to every single summon.
   let shown = false;
-  const reveal = () => {
+  const reveal = (trigger) => {
     if (shown || win.isDestroyed() || launcher !== win) return;
     shown = true;
 
@@ -618,6 +627,7 @@ function showLauncher() {
     // clicked. Retrying, reordering, or escalating to a regular app (tried: the Dock icon appeared
     // and focus still stayed put) cannot help, because the request itself is refused.
     win.show();
+    logLine('INFO', `[summon] revealed via ${trigger} — ${Date.now() - t0}ms from hotkey to show()`);
     win.webContents.focus();                    // ensure keystrokes go to the input
     // Carries the draft AND the sticky mode so the renderer can paint both in the same tick it
     // focuses — an invoke() round-trip would let a normal-looking empty bar paint first and then
@@ -644,8 +654,13 @@ function showLauncher() {
 
   // Reveal only once the window has painted (no blank flash). ready-to-show is the primary
   // trigger; did-finish-load is a fallback in case it's flaky for a transparent window.
-  win.once('ready-to-show', reveal);
-  win.webContents.once('did-finish-load', () => setTimeout(reveal, 250)); // fallback if ready-to-show is flaky
+  win.once('ready-to-show', () => {
+    // Logged even when the fallback got there first, because "fired late" and "never fired" are
+    // different diagnoses with the same symptom, and only this line tells them apart.
+    if (shown) logLine('INFO', `[summon] ready-to-show arrived ${Date.now() - t0}ms in, after the fallback had already revealed`);
+    reveal('ready-to-show');
+  });
+  win.webContents.once('did-finish-load', () => setTimeout(() => reveal('fallback'), 250)); // fallback if ready-to-show is flaky
 }
 
 // Hand activation BACK to whatever app you were in, the way Spotlight does. Destroying our only

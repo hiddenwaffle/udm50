@@ -33,6 +33,25 @@ Believed done, never actually confirmed.
       hidden titlebar activates the app. `roundedCorners: false` is already in as the reported
       fix, but nobody has tried to trigger it.
 
+## Open on Tahoe
+
+Seen on macOS 26 and not on 15.6, both reported 2026-08-28. Neither is a new bug: they are
+existing choices that Sequoia was hiding.
+
+- [ ] **The bar lags between the hotkey and appearing.** Every summon destroys the old bar and
+      builds a new window plus renderer, by design, so it is born on the current Space. The
+      suspicion is narrower than that though: the reveal has a primary trigger (`ready-to-show`)
+      and a fallback (`did-finish-load` plus a 250 ms timer). If the primary never fires for a
+      transparent panel on Tahoe, every summon pays that fixed quarter second. `showLauncher` now
+      logs which trigger won and the total milliseconds to `.userdata/diagnostics.log`, so one
+      press on the Tahoe machine settles it. A log full of `fallback` means the timer is the lag.
+- [ ] **A faint translucent rectangle shows at the bar's corners.** `roundedCorners: false`
+      (added as the titlebar-click fix) means the window really is a hard rectangle and only CSS
+      rounds it, so the corner notches are not empty: `#panel`'s `box-shadow` paints into them,
+      and `hasShadow` is unset so macOS also draws its own rectangular window shadow. Three
+      one-line tests, each isolating one source: `hasShadow: false`; drop the CSS `box-shadow`;
+      `roundedCorners: true` (diagnostic only, it reverts the titlebar fix).
+
 ## Decisions, one line each
 
 - [ ] **Should `⌘S` update the remembered save folder while in forget mode?** It currently
